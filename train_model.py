@@ -62,5 +62,22 @@ def main():
     
     # Split the data using the training and testing splits
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    
-            
+
+    # Random Forest Model Training
+    rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
+    rf_model.fit(X_train, y_train)
+
+    # Evaluation of the model
+    y_pred = rf_model.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
+    print(f"\n ~~~Training is Complete~~~")
+    print(f"Accuracy: {accuracy * 100:.2f}%")
+    print("\nDetailed Report:")
+    print(classification_report(y_test, y_pred))
+
+    # Saving the model
+    joblib.dump(rf_model, MODEL_FILE)
+    print(f"Model saved to {MODEL_FILE}")
+
+if __name__ == "__main__":
+    main()
