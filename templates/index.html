@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Phishing URL Detector</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1> Phishing Detector</h1>
+        <p> Enter a URL that you suspect is malicious</p>
+        <form method="POST">
+            <input type="text" name="url" placeholder="http://example.com" value="{{ url }}" required>
+            <br><br>
+            <input type="submit" value="Scan URL">
+        </form>
+
+        {% if prediction %}
+            <div class="result {% if 'malicious' in prediction %}danger{% else %}safe{% endif %}">
+                <p>{{ prediction }}</p>
+                    <small> Confidence Score: {{ confidence }}</small>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>

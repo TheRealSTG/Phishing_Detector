@@ -58,7 +58,7 @@ def extract_features(url):
     ## Malware often live on raw IP addresses.
     ## Uses regex to check if the domain is a raw IP address instead of a domain name.
     ## Sets the flag to 1 if found.
-    ip_pattern = r"(([01]?\d?|2[0-4]\d|25[0-5]\.){3}([01]?\d\d?|2[0-4]\d|25[0-5])"
+    ip_pattern = r"(([01]?\d\d?|2[0-4]\d|25[0-5])\.){3}([01]?\d\d?|2[0-4]\d|25[0-5])"
     if re.search(ip_pattern, parsed_url.netloc):
         features['has_ip_in_domain'] = 1
     else:
