@@ -6,6 +6,7 @@ import joblib
 # Pandas is used for data handling and the features are stored and used as a DataFrame
 import pandas as pd
 from features import extract_features
+from flask import jsonify
 
 # A Flask Web Application instance is created
 app = Flask(__name__)
@@ -56,6 +57,28 @@ def home():
         
     # Renders the HTML template, passes the prediction message, Original URL, and confidence score formatted to 1 decimal place as a percentage.    
     return render_template('index.html', prediction = prediction_text, url = url_input, confidence = f"{confidence:.1f}%")
+
+@app.route('/api/predict', methods=['POST'])
+def predict_api():
+    data = request.get_json(force= True)
+    url_input = data.get('url', '')
+
+    features = extract_features(url_input)
+
+    if not features:
+        return jsonify({'error': 'Invalid URL'}), 400
+    
+    df_features = pd.DataFrame([features])
+    prediction = model.predict(df_features)[0]
+    probability = model.predict_probability(df_features)[0][1] * 100
+
+    result = {
+        'url' : url_input,
+        'is_malicious': bool(prediction == 1),
+        'confidence_score': f"{probability:.1f}%" if prediction ++ 1 else f"{100 - probability:.1f}%",
+        'phishing_probability': probability
+    }
+    return jsonify(result)
 
 # Runs the Flask app in debug mode
 # Debug mode allows auto-reload on code changes and detailed error messages.
