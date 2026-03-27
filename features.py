@@ -3,6 +3,21 @@ import re
 # Used to break down the URLs into its constituent components, like its scheme, netloc, path
 from urllib.parse import urlparse
 
+import math
+from collections import Counter
+
+#
+def calculate_entropy(text):
+    if not text:
+        return 0
+    entropy = 0
+    length = len(text)
+    # Count the frequency of each character 
+    for count in Counter(text).values():
+        probability = count / length
+        entropy -= probability * math.log2(probability)
+    return entropy
+
 # Inputs URL string 
 def extract_features(url):
     # Initialises the empty dictionary
@@ -27,6 +42,9 @@ def extract_features(url):
     ## Calculates the path length 
     ### Sometimes, longer URLs are used in phishing.
     features['path_length'] = len(parsed_url.path)
+    
+    features['url_entropy'] = calculate_entropy(url)
+    features['domain_entrophy'] = calculate_entropy(parsed_url.netloc)
 
     # Special character counting
     ## Phishers often use these to confuzzle users

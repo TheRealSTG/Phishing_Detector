@@ -8,6 +8,7 @@ import pandas as pd
 from features import extract_features
 from flask import jsonify
 
+
 # A Flask Web Application instance is created
 app = Flask(__name__)
 
