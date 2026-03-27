@@ -18,6 +18,17 @@
             <div class="result {% if 'malicious' in prediction %}danger{% else %}safe{% endif %}">
                 <p>{{ prediction }}</p>
                     <small> Confidence Score: {{ confidence }}</small>
+
+                    {% if risks %}
+                        <div style="margin-top: 15px; text-align: left; background: #fff0f0; padding: 10px; border-radius: 5px;">
+                            <strong> Risk Factors Detected: </strong>
+                            <ul>
+                                {% for risk in risks %}
+                                    <li>{{ risk }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    {% endif %}
             </div>
         {% endif %}
     </div>

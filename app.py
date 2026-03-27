@@ -58,6 +58,7 @@ def home():
 
     # Explainability
     # The goal is to show why a malicious URL has been classified as one.
+    # This shows WHY a URL was flagged to be malicious.
     risk_reasons = []
     if features['has_ip_in_domain'] == 1:
         risk_reasons.append("IP address used instead of domain name")
