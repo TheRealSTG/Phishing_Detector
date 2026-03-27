@@ -55,9 +55,21 @@ def home():
                 confidence = 100 - probability
         else:
             prediction_text = "Error: Invalid URL format"
+
+    # Explainability
+    # The goal is to show why a malicious URL has been classified as one.
+    risk_reasons = []
+    if features['has_ip_in_domain'] == 1:
+        risk_reasons.append("IP address used instead of domain name")
+    if features['is_non_std_port'] == 1:
+        risk_reasons.append("URL uses a non-standard port")
+    if features['suspicious_keyword_count'] > 0:
+        risk_reasons.append("URL contains suspicious security/banking keywords")
+    if features['url_length'] > 100:
+        risk_reasons.append("URL is abnormally long")
         
     # Renders the HTML template, passes the prediction message, Original URL, and confidence score formatted to 1 decimal place as a percentage.    
-    return render_template('index.html', prediction = prediction_text, url = url_input, confidence = f"{confidence:.1f}%")
+    return render_template('index.html', prediction = prediction_text, url = url_input, confidence = f"{confidence:.1f}%", risks = risk_reasons)
 
 @app.route('/api/predict', methods=['POST'])
 def predict_api():
