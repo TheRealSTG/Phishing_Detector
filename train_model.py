@@ -32,21 +32,36 @@ def main():
     # Drop the rows where the URL is missing or not a number
     df = df.dropna(subset=['url'])
 
-    # Use .apply() which is much faster than iterrows (which is why i dont use it anymo)
-    # This assumes that extract_features returns a dictionary
-    features_df = df['url'].apply(lambda x: pd.Series(extract_features(x)))
+    print("Extracting Features...")
 
-    # Combines features with the original labels
-    X = features_df
-    # Convert labels:
-        # 'benign' -> 0
-        # 'anything else' -> 1
-    y = df['type'].apply(lambda x: 0 if x == 'benign' else 1)
-
-    # Feature Extraction
     features_list = []
-    labels = []
+    valid_labels = []
 
+    # Iterating through the data and building a list of valid feature sets
+    for index, row in df.iterrows():
+        url = row['url']
+        label = row['type']
+
+        extracted = extract_features(url)
+
+        # Only keep rows where extraction is succesful
+        if extracted is not None:
+            features_list.append(extracted)
+            # Convert labels
+            valid_labels.append(0 if label == 'benign' else 1)
+
+    # Converting the lists into Pandas Objects
+
+    X = pd.DataFrame(features_list)
+    y = pd.Series(valid_labels)
+
+    print(f"Successfully extracted features for {len(X)} valid URLs out of {len(df)} total.") 
+
+    # Checking before splitting
+    if len(X) == 0:
+        print("ERROR: 'X' is empty. Check features.py")
+        exit()
+    
 
     # Old Approach, still keeping it here just because 
     ##################################################################################
@@ -72,8 +87,6 @@ def main():
     
     # Converts the feature list into a DataFrame  with each feature as a column and each URL as a row.
     ## Converts the labels into a Series.
-    X = pd.DataFrame(features_list)
-    y = pd.Series(labels)
 
     print(f"Training on {len(X)} URLs...")
     

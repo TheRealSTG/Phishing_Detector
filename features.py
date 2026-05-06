@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 import math
 from collections import Counter
+import tldextract
 
 #
 def calculate_entropy(text):
@@ -31,7 +32,11 @@ def extract_features(url):
     # Parses the URL, returns None if the parsing fails due to a malformed URL.
     try:
         parsed_url = urlparse(url)
-    except:
+        # tldextract fetches the list if it doesnt have it
+        extracted_domain = tldextract.extract(url)
+    except Exception as e:
+        # instead of just faliing, it will say why it failed
+        print(f"Failed to parse URL {url}. Error {e}")
         return None
     
     # Structure and Length Features

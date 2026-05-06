@@ -2,3 +2,5 @@ pandas
 scikit-learn
 flask
 joblib
+requests
+tldextract
