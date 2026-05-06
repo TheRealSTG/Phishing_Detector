@@ -27,31 +27,48 @@ def main():
         return
     
     # Filter out for a cleaner dataset
-    print("Extracting features.")
+    print("Extracting vectorised features.")
+
+    # Drop the rows where the URL is missing or not a number
+    df = df.dropna(subset=['url'])
+
+    # Use .apply() which is much faster than iterrows (which is why i dont use it anymo)
+    # This assumes that extract_features returns a dictionary
+    features_df = df['url'].apply(lambda x: pd.Series(extract_features(x)))
+
+    # Combines features with the original labels
+    X = features_df
+    # Convert labels:
+        # 'benign' -> 0
+        # 'anything else' -> 1
+    y = df['type'].apply(lambda x: 0 if x == 'benign' else 1)
 
     # Feature Extraction
     features_list = []
     labels = []
 
+
+    # Old Approach, still keeping it here just because 
+    ##################################################################################
     # Iterate to handle any bad data
     ## Iterates through each row and extracts the URL and label columns
     ## Calls the extract_function() on the URL and appends the result to features_list
     ## Skips the malformed URLs
-    for index, row in df.iterrows():
-        url = row['url']
-        label = row['type']
+    # for index, row in df.iterrows():
+    #    url = row['url']
+    #    label = row['type']
 
-        extracted = extract_features(url)
-        if extracted:
-            features_list.append(extracted)
-            # Convert the text label to a number.
-            ## Phishing = 1
-            ## Benign = 0
-            if label == 'benign':
-                labels.append(0)
-            else:
-                # Everything else is treated as phishing
-                labels.append(1)
+    #    extracted = extract_features(url)
+    #    if extracted:
+    #        features_list.append(extracted)
+    #        # Convert the text label to a number.
+    #        ## Phishing = 1
+    #        ## Benign = 0
+    #        if label == 'benign':
+    #            labels.append(0)
+    #        else:
+    #            # Everything else is treated as phishing
+    #            labels.append(1)
     
     # Converts the feature list into a DataFrame  with each feature as a column and each URL as a row.
     ## Converts the labels into a Series.

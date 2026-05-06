@@ -9,11 +9,56 @@ from features import extract_features
 from flask import jsonify
 
 
+import os
+from urllib.parse import urlparse
+import time
+import requests
+import zipfile
+import io
+
+
+
 # A Flask Web Application instance is created
 app = Flask(__name__)
 
 # Model is loaded here when the app starts
 model = joblib.load('model.pkl')
+
+## WHITELISTING Logic
+WHITELIST_FILE = 'top_10k_domains.txt'
+# Using a set because we need the O(1) lookups
+WHITELIST_DOMAINS = set()
+
+def load_whitelist():
+    """Loads the domains from the text file into a set."""
+    if os.path.exists(WHITELIST_FILE):
+        with open(WHITELIST_FILE, 'r', encoding='utf-8') as file:
+            for line in file:
+                # Strip removes any hidden whitespaces of newlines
+                domain = line.strip().lower()
+                if domain:
+                    WHITELIST_DOMAINS.add(domain)
+        print(f"Loaded {len(WHITELIST_DOMAINS)} domains into the whitelist.")
+    else:
+        print(f"WARNING {WHITELIST_DOMAINS} not found. Whitelist is empty.")
+
+# Called immediately so it is loaded up before a user can ever make a request.
+load_whitelist()
+
+def is_whitelisted(url):
+    """Checks if the base domain of the URL is in our whitelist."""
+    try:
+        # Extract the network location
+        # Example: www.youtube.com
+        netloc = urlparse(url).netloc.lower()
+
+        # Remove 'www.' if it exists to match our text file format
+        if netloc.startswith('www.'):
+            netloc = netloc[4:]
+
+        return netloc in WHITELIST_DOMAINS
+    except Exception:
+        return False
 
 # Defines a route for the home page, /
 # Accepts both GET requests that are used for displaying the page
@@ -30,6 +75,13 @@ def home():
     if request.method == 'POST':
         # Extracts the URL from the form data.
         url_input = request.form['url']
+
+        ## Check the whitelist first before handing the URL over to the Machine Learning Model
+        if is_whitelisted(url_input):
+            return render_template('index.html', 
+                                   prediction= "This URL looks to be a legitimate one.",
+                                   url = url_input,
+                                   confidence= "100% (Trusted Domain)")
 
         # Feature Extraction happens here
         features = extract_features(url_input)
@@ -89,7 +141,7 @@ def predict_api():
     result = {
         'url' : url_input,
         'is_malicious': bool(prediction == 1),
-        'confidence_score': f"{probability:.1f}%" if prediction ++ 1 else f"{100 - probability:.1f}%",
+        'confidence_score': f"{probability:.1f}%" if prediction == 1 else f"{100 - probability:.1f}%",
         'phishing_probability': probability
     }
     return jsonify(result)
