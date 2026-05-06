@@ -25,9 +25,48 @@ app = Flask(__name__)
 model = joblib.load('model.pkl')
 
 ## WHITELISTING Logic
-WHITELIST_FILE = 'top_10k_domains.txt'
+WHITELIST_FILE = 'top-1m.csv'
+TRANCO_URL = 'https://tranco-list.eu/top-1m.csv.zip'
+# Update the list if it is older than Seven days
+MAX_AGE_DAYS = 7
 # Using a set because we need the O(1) lookups
 WHITELIST_DOMAINS = set()
+
+def update_whitelist_if_needed():
+    """Downloads a fresh Top 1M list if the current one is too old or missing."""
+    needs_update = False
+
+    if not os.path.exists(WHITELIST_FILE):
+        print("Whitelist file is not found. Flagging for download...")
+        needs_update = True
+    else:
+        # Check the age of the file
+        file_age_seconds = time.time() - os.path.getmtime(WHITELIST_FILE)
+        file_age_days = file_age_seconds / (60*60*24)
+
+        if file_age_days > MAX_AGE_DAYS:
+            print(f"Whitelist is {file_age_days:.1f} days old. Flagging for update.")
+            needs_update = True
+    
+    if needs_update:
+        print(f"Downloading fresh Top 1M list from Tranco...")
+        try:
+            # Download the zip file into memory
+            response = requests.get(TRANCO_URL)
+            # Ensure the download was successful
+            response.raise_for_status()
+
+            # Extract the CSV from the downloaded zip file
+            with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+                # Tranco zip file usually contains exactly one CSV file
+                csv_filename = z.namelist()[0]
+                with open(WHITELIST_FILE, 'wb') as f:
+                    f.write(z.read(csv_filename))
+
+            print("Successfully updated the Top 1M whitelist.")
+        except Exception as e:
+            print(f"ERROR: Failed to update whitelist: {e}")
+            print("Will attempt to proceed with the exisitng list if available.")
 
 def load_whitelist():
     """Loads the domains from the text file into a set."""
@@ -41,9 +80,6 @@ def load_whitelist():
         print(f"Loaded {len(WHITELIST_DOMAINS)} domains into the whitelist.")
     else:
         print(f"WARNING {WHITELIST_DOMAINS} not found. Whitelist is empty.")
-
-# Called immediately so it is loaded up before a user can ever make a request.
-load_whitelist()
 
 def is_whitelisted(url):
     """Checks if the base domain of the URL is in our whitelist."""
@@ -59,6 +95,14 @@ def is_whitelisted(url):
         return netloc in WHITELIST_DOMAINS
     except Exception:
         return False
+    
+
+## Boot Sequence
+
+print("Starting Phishing Detecter Boot Sequence...")
+update_whitelist_if_needed()
+load_whitelist()
+print("Boot Sequence Complete.")
 
 # Defines a route for the home page, /
 # Accepts both GET requests that are used for displaying the page
