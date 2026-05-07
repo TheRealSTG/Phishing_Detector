@@ -110,63 +110,72 @@ print("Boot Sequence Complete.")
 @app.route('/', methods=['GET','POST'])
 def home():
     # Variables are initialised in order to ensure that the template is safely rendered
-    # Also to ensure tey exist before any branch runs so UnboundLocalError or NameError does not get encountered 
-    prediction_text = ""
-    url_input = ""
-    confidence = 0
+    # Also to ensure they exist before any branch runs so UnboundLocalError or NameError does not get encountered 
+    # prediction_text = ""
+    # url_input = ""
+    # confidence = 0
+    
+    ## These still had the UnboundLocalError occuring because the feature extraction and Machine Learning logic was in the POST method, which does not run until i scan a URL
+    ## However, the code under the GET method needed the features soo thats why i am changing this up.
 
-    # Checks if the user submitted a form (POST Request)
+    # Default variables for when the page first loads (GET)
+    prediction_text = None
+    confidence_text = None
+    url_input = None
+    risk_reasons = []
+
+    # Only runs when the user clicks 'Scan URL'
     if request.method == 'POST':
-        # Extracts the URL from the form data.
         url_input = request.form['url']
 
-        ## Check the whitelist first before handing the URL over to the Machine Learning Model
+        # Check the whitelist
         if is_whitelisted(url_input):
-            return render_template('index.html', 
-                                   prediction= "This URL looks to be a legitimate one.",
+            return render_template('index.html',
+                                   prediction = "This URL looks to be a legitimate one.",
                                    url = url_input,
-                                   confidence= "100% (Trusted Domain)")
+                                   confidence= "100.0 % Trusted Domain",
+                                   risks=[])
 
-        # Feature Extraction happens here
+        # Feature Extraction if not in a whitelist
         features = extract_features(url_input)
 
-        if features:
-            # Model Prep
-            df_features = pd.DataFrame([features])
+        # If the URL was completely invalid and features.py returned None
+        if features is None:
+            return render_template('index.html', 
+                                   prediction="Error: Unable to parse this URL. Please check the format.", 
+                                   url=url_input)
 
-            # Prediction
-            ## Returns the classification (0 or 1)
-            ## [0] extracts the first result.
-            prediction = model.predict(df_features)[0]
-            # Returns probability for each class.
-            ## [0][1] gets the probability of class 1 (phishing) then multiplies by 100 to get a percentage
-            probability = model.predict_proba(df_features)[0][1] * 100
+        # Model Prediction
+        df_features = pd.DataFrame([features])
+        prediction = model.predict(df_features)[0]
+        probability = model.predict_proba(df_features)[0][1] * 100
 
-            if prediction == 1:
-                prediction_text = "This URL looks to be malicious"
-                confidence = probability
-            else:
-                prediction_text = "This URL looks to be a legitimate one."
-                # Confidence is 100 minus phishing probability, giving the benign confidence.
-                confidence = 100 - probability
+        if prediction == 1:
+            prediction_text = "This URL looks to be mailcious"
+            confidence_text = f"{probability:.1f}%"
         else:
-            prediction_text = "Error: Invalid URL format"
+            prediction_text = "This uRL looks to be safe"
+            confidence_text = f"{100 - probability:.1f}%"
 
-    # Explainability
-    # The goal is to show why a malicious URL has been classified as one.
-    # This shows WHY a URL was flagged to be malicious.
-    risk_reasons = []
-    if features['has_ip_in_domain'] == 1:
-        risk_reasons.append("IP address used instead of domain name")
-    if features['is_non_std_port'] == 1:
-        risk_reasons.append("URL uses a non-standard port")
-    if features['suspicious_keyword_count'] > 0:
-        risk_reasons.append("URL contains suspicious security/banking keywords")
-    if features['url_length'] > 100:
-        risk_reasons.append("URL is abnormally long")
-        
-    # Renders the HTML template, passes the prediction message, Original URL, and confidence score formatted to 1 decimal place as a percentage.    
-    return render_template('index.html', prediction = prediction_text, url = url_input, confidence = f"{confidence:.1f}%", risks = risk_reasons)
+        # Risk Factors
+        if features['has_ip_in_domain'] == 1:
+            risk_reasons.append("IP Address used instead of domain name")
+        if features['is_non_std_port'] == 1:
+            risk_reasons.append("URL uses a non-standard port")
+        if features.get('suspicious_keyword_count', 0) > 0:
+            risk_reasons.append("URL contains suspicious security/ banking keywords")
+        if features.get('url_length', 0) > 75:
+            risk_reasons.append("URL is abnormally long")
+
+    # Rendering the page
+    ## Handles bpth initial GET load and the POST results
+    return render_template('index.html',
+                           prediction=prediction_text,
+                           url=url_input,
+                           confidence=confidence_text,
+                           risks=risk_reasons) 
+
+
 
 @app.route('/api/predict', methods=['POST'])
 def predict_api():
