@@ -126,7 +126,19 @@ def home():
 
     # Only runs when the user clicks 'Scan URL'
     if request.method == 'POST':
-        url_input = request.form['url']
+        # Strip removes the accidental spaces at the start or end
+        url_input = request.form['url'].strip()
+
+        # Edge Case
+        ## Check for completely invalid formats (spaces or missing domain dots)
+        if " " in url_input or "." not in url_input:
+            return render_template('index.html',
+                                   prediction="Error: Invalid format. Please Enter a valid URL.",
+                                   url=url_input)
+        # Edge Case
+        ## Normalize missing schemes (urlparse breaks without http/https)
+        if not url_input.startswith(('http://', 'https://')):
+            url_input = 'http://' + url_input
 
         # Check the whitelist
         if is_whitelisted(url_input):
@@ -151,10 +163,10 @@ def home():
         probability = model.predict_proba(df_features)[0][1] * 100
 
         if prediction == 1:
-            prediction_text = "This URL looks to be mailcious"
+            prediction_text = "This URL looks to be malicious."
             confidence_text = f"{probability:.1f}%"
         else:
-            prediction_text = "This uRL looks to be safe"
+            prediction_text = "This URL looks to be safe."
             confidence_text = f"{100 - probability:.1f}%"
 
         # Risk Factors
