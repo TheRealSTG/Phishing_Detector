@@ -1,13 +1,25 @@
 # Regular Expression module used for pattern matching
 import re
 # Used to break down the URLs into its constituent components, like its scheme, netloc, path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 
 import math
 from collections import Counter
 import tldextract
 
-#
+# Recursively decudes the URL encoded strings to defeat multi-layer obfuscation.
+def deep_decode(text):
+    if not text:
+        return ""
+    
+    decoded = unquote(text)
+    # Keep decoding until the string stops changing.
+    while decoded != text:
+        text = decoded
+        decoded = unquote(text)
+    return decoded.lower()
+    
+
 def calculate_entropy(text):
     if not text:
         return 0
@@ -91,15 +103,13 @@ def extract_features(url):
     ## Defines keywords that are commonly found in phisihing URLs.
     ## Loops through each keyword and counts how many times they appear in the URL
     ## This is case-insensitive.
+
+    # Use the deep_decode function before checking for suspicious keywords.
+    fully_decoded_url = deep_decode(url)
     suspicious_keywords = [
         'login', 'secure', 'account', 'update', 'banking', 'confirm', 'verify', 'password',
         'ebay', 'paypal', 'signin', 'upi'
     ]
-
-    match_count = 0
-    for word in suspicious_keywords:
-        if word in url.lower():
-            match_count += 1
-    features['suspicious_keyword_count'] = match_count
+    features['suspicious_keyword_count'] = sum(1 for word in suspicious_keywords if word in fully_decoded_url)
 
     return features
