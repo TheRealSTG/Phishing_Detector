@@ -31,6 +31,10 @@ def calculate_entropy(text):
         entropy -= probability * math.log2(probability)
     return entropy
 
+def is_obfuscated_ip(netloc):
+    domain = netloc.split(':')[0]
+    try:
+
 # Inputs URL string 
 def extract_features(url):
     # Initialises the empty dictionary

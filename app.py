@@ -7,16 +7,14 @@ import joblib
 import pandas as pd
 from features import extract_features
 from flask import jsonify
-
-
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import os
 from urllib.parse import urlparse
 import time
 import requests
 import zipfile
 import io
-
-
 
 # A Flask Web Application instance is created
 app = Flask(__name__)
@@ -52,7 +50,7 @@ def update_whitelist_if_needed():
         print(f"Downloading fresh Top 1M list from Tranco...")
         try:
             # Download the zip file into memory
-            response = requests.get(TRANCO_URL)
+            response = requests.get(TRANCO_URL, timeout = 30)
             # Ensure the download was successful
             response.raise_for_status()
 
@@ -74,7 +72,9 @@ def load_whitelist():
         with open(WHITELIST_FILE, 'r', encoding='utf-8') as file:
             for line in file:
                 # Strip removes any hidden whitespaces of newlines
-                domain = line.strip().lower()
+                parts = line.strip().split(',')
+                if len(parts) >= 2:
+                    domain = parts[1].lower()
                 if domain:
                     WHITELIST_DOMAINS.add(domain)
         print(f"Loaded {len(WHITELIST_DOMAINS)} domains into the whitelist.")
@@ -189,10 +189,17 @@ def home():
 
 
 
+# Rate Limiting
+limiter = Limiter(get_remote_address, app= app, default_limits=["200 per day", '50 per hour'])
+
 @app.route('/api/predict', methods=['POST'])
+@limiter.limit("10 per minute")
 def predict_api():
     data = request.get_json(force= True)
     url_input = data.get('url', '')
+    # Input Length Validation on the API
+    if len(url_input) > 2048:
+        return jsonify({'error': 'URL too long'}), 400
 
     features = extract_features(url_input)
 
@@ -213,5 +220,7 @@ def predict_api():
 
 # Runs the Flask app in debug mode
 # Debug mode allows auto-reload on code changes and detailed error messages.
+# app.run(debug = True)
+## Not running in debug more anymore.
 if __name__ == "__main__":
-    app.run(debug = True)
+    app.run(debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true')
