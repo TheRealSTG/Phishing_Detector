@@ -1,107 +1,117 @@
-from flask import Flask, render_template, request, jsonify
+"""
+app.py
+------
+Flask application for the Phishing Detector.
+
+Prediction pipeline per URL:
+  1. Whitelist check    → fast exit if trusted domain
+  2. Threat feed check  → hard MALICIOUS if in OpenPhish / URLhaus
+  3. ML model           → Random Forest / XGBoost prediction + SHAP explanation
+  4. WHOIS enrichment   → domain age risk flags appended to results
+"""
+
+import os
+import time
+import threading
+
 import joblib
 import pandas as pd
-from features import extract_features
-import os
-from urllib.parse import urlparse
-import time
 import requests
+import tldextract
 import zipfile
 import io
 import shap
-import tldextract
+
+from flask import Flask, render_template, request, jsonify
+from features  import extract_features
+from threat_feeds import is_known_malicious, load_from_cache, refresh_feeds
+from enrichment   import build_enrichment_flags
 
 app = Flask(__name__)
 
-# Loading the model
+# ---------------------------------------------------------------------------
+# Model Loading
+# ---------------------------------------------------------------------------
 try:
     model = joblib.load('model.pkl')
 except FileNotFoundError:
     raise RuntimeError(
-        "model.pkl not found. Run `python train_model.py` first to generate it."
+        "model.pkl not found. Run `python train_model.py` first."
     )
- 
-# SHAP Explainer  — loaded once at startup so it's fast per-request
+
+# ---------------------------------------------------------------------------
+# SHAP Explainer (loaded once at startup)
+# ---------------------------------------------------------------------------
 explainer = shap.TreeExplainer(model)
 
-# Human-readable labels for every feature produced by features.py
+# Human-readable labels for every feature in features.py
 FEATURE_LABELS = {
-    'url_length':               'URL Length',
-    'hostname_length':          'Domain Name Length',
-    'path_length':              'Path Length',
-    'url_entropy':              'URL Randomness (Entropy)',
+    'url_length':              'URL Length',
+    'hostname_length':         'Domain Name Length',
+    'path_length':             'Path Length',
+    'url_entropy':             'URL Randomness (Entropy)',
     'domain_entropy':          'Domain Randomness (Entropy)',
-    'dot_count':                'Number of Dots',
-    'hyphen_count':             'Number of Hyphens',
-    'at_count':                 '@ Symbol Present',
-    'question_count':           'Query Parameters',
-    'percent_count':            'URL-Encoded Characters',
-    'is_https':                 'Uses HTTPS',
-    'is_non_std_port':          'Non-Standard Port',
-    'has_ip_in_domain':         'IP Address Used as Domain',
-    'suspicious_keyword_count': 'Suspicious Keywords',
+    'dot_count':               'Number of Dots',
+    'hyphen_count':            'Number of Hyphens',
+    'at_count':                '@ Symbol Present',
+    'question_count':          'Query Parameters',
+    'percent_count':           'URL-Encoded Characters',
+    'is_https':                'Uses HTTPS',
+    'is_non_std_port':         'Non-Standard Port',
+    'has_ip_in_domain':        'IP Address Used as Domain',
+    'suspicious_keyword_count':'Suspicious Keywords',
+    'subdomain_depth':         'Subdomain Depth',
+    'tld_risk_score':          'High-Risk TLD',
+    'brand_lookalike_score':   'Brand Lookalike Distance',
+    'digit_ratio_in_domain':   'Digits in Domain Name',
+    'has_punycode':            'Punycode / Homograph Domain',
+    'path_depth':              'URL Path Depth',
 }
 
+# ---------------------------------------------------------------------------
 # Whitelist Logic
-
-WHITELIST_FILE = 'top-1m.csv'
-TRANCO_URL     = 'https://tranco-list.eu/top-1m.csv.zip'
-MAX_AGE_DAYS   = 7
-WHITELIST_DOMAINS: set = set()
+# ---------------------------------------------------------------------------
+WHITELIST_FILE    = 'top-1m.csv'
+TRANCO_URL        = 'https://tranco-list.eu/top-1m.csv.zip'
+MAX_AGE_DAYS      = 7
+WHITELIST_DOMAINS: set[str] = set()
 
 
 def update_whitelist_if_needed() -> None:
-    """Downloads a fresh Tranco Top-1M list if the current one is missing or stale."""
     needs_update = False
-
     if not os.path.exists(WHITELIST_FILE):
-        print("Whitelist file not found. Flagging for download...")
         needs_update = True
     else:
-        file_age_days = (time.time() - os.path.getmtime(WHITELIST_FILE)) / 86400
-        if file_age_days > MAX_AGE_DAYS:
-            print(f"Whitelist is {file_age_days:.1f} days old. Flagging for update.")
+        age_days = (time.time() - os.path.getmtime(WHITELIST_FILE)) / 86400
+        if age_days > MAX_AGE_DAYS:
             needs_update = True
 
     if needs_update:
-        print("Downloading fresh Top-1M list from Tranco...")
+        print("[whitelist] Downloading fresh Tranco Top-1M list...")
         try:
-            response = requests.get(TRANCO_URL, timeout=30)
-            response.raise_for_status()
-            with zipfile.ZipFile(io.BytesIO(response.content)) as z:
-                csv_filename = z.namelist()[0]
+            resp = requests.get(TRANCO_URL, timeout=30)
+            resp.raise_for_status()
+            with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
                 with open(WHITELIST_FILE, 'wb') as f:
-                    f.write(z.read(csv_filename))
-            print("Successfully updated the Top-1M whitelist.")
+                    f.write(z.read(z.namelist()[0]))
+            print("[whitelist] Updated successfully.")
         except Exception as e:
-            print(f"ERROR: Failed to update whitelist: {e}")
-            print("Will proceed with the existing list if available.")
+            print(f"[whitelist] Download failed: {e}")
 
 
 def load_whitelist() -> None:
-    """
-    Loads the Tranco CSV (format: rank,domain) into the WHITELIST_DOMAINS set.
-    The previous version used line.strip() which stored '1,google.com' instead
-    of 'google.com' — this version splits on comma correctly.
-    """
     if not os.path.exists(WHITELIST_FILE):
-        print(f"WARNING: {WHITELIST_FILE} not found. Whitelist will be empty.")
+        print("[whitelist] WARNING: File not found. Whitelist is empty.")
         return
-
     with open(WHITELIST_FILE, 'r', encoding='utf-8') as f:
         for line in f:
             parts = line.strip().split(',')
             if len(parts) >= 2:
                 WHITELIST_DOMAINS.add(parts[1].lower())
-
-    print(f"Loaded {len(WHITELIST_DOMAINS):,} domains into the whitelist.")
+    print(f"[whitelist] Loaded {len(WHITELIST_DOMAINS):,} trusted domains.")
 
 
 def is_whitelisted(url: str) -> bool:
-    """
-    Checks the registered domain (e.g. google.com) against the whitelist.
-    Uses tldextract so subdomains like mail.google.com still match correctly.
-    """
     try:
         ext = tldextract.extract(url)
         registered = f"{ext.domain}.{ext.suffix}".lower()
@@ -110,180 +120,101 @@ def is_whitelisted(url: str) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
 # SHAP Explanation Builder
+# ---------------------------------------------------------------------------
+
 def build_explanation(df_features: pd.DataFrame) -> list[dict]:
     """
-    Computes per-feature SHAP contributions for a single prediction.
+    Returns top-6 SHAP contributions as a list of dicts:
+      { label, value (0-100 scale), direction ('risk' | 'safe') }
 
-    Returns a list of up to 6 dicts, sorted by absolute impact:
-        {
-            'label':     str,   # Human-readable feature name
-            'value':     float, # Contribution magnitude (0–100 scale)
-            'direction': str,   # 'risk'  → pushes toward malicious
-                                # 'safe'  → pushes toward benign
-        }
-
-    SHAP values for class-1 (malicious):
-        positive → feature increases the probability of being malicious
-        negative → feature decreases the probability (pushes toward safe)
+    Handles both old SHAP (returns list) and new SHAP (returns ndarray).
     """
     try:
         shap_values = explainer.shap_values(df_features)
 
-        # shap_values is [class_0_array, class_1_array]; each shape (1, n_features)
-        # Older values of SHAP (< 0.42): returns [class_0_array, class_1_array]
-        # Newer SHAP (>= 0.42): returns a single 2D array for the positive class
+        # Older SHAP (< 0.42): list of [class_0_array, class_1_array]
+        # Newer SHAP (>= 0.42): single 2D array, positive class only
         if isinstance(shap_values, list):
             contributions = shap_values[1][0]
         else:
-            # shape = (n_features,)
-            contributions = shap_values[0] 
-        
-        feature_names = df_features.columns.tolist()
+            contributions = shap_values[0]
 
         explanation = []
-        for name, raw_value in zip(feature_names, contributions):
-            if abs(raw_value) < 0.001:          # skip negligible contributions
+        for name, raw in zip(df_features.columns, contributions):
+            if abs(raw) < 0.001:
                 continue
             explanation.append({
                 'label':     FEATURE_LABELS.get(name, name.replace('_', ' ').title()),
-                'value':     round(abs(raw_value) * 100, 1),
-                'direction': 'risk' if raw_value > 0 else 'safe',
+                'value':     round(abs(raw) * 100, 1),
+                'direction': 'risk' if raw > 0 else 'safe',
             })
 
         explanation.sort(key=lambda x: x['value'], reverse=True)
-        return explanation[:6]                   # top 6 factors only
+        return explanation[:6]
 
     except Exception as e:
-        print(f"SHAP explanation failed: {e}")
+        print(f"[shap] Explanation failed: {e}")
         return []
 
 
-# Boot Sequence
-print("=" * 50)
-print("  Phishing Detector — Boot Sequence")
-print("=" * 50)
-update_whitelist_if_needed()
-load_whitelist()
-print("Boot Sequence Complete. App is ready.\n")
+# ---------------------------------------------------------------------------
+# Core Prediction Pipeline
+# ---------------------------------------------------------------------------
 
-
-# Routes
-@app.route('/', methods=['GET', 'POST'])
-def home():
-    prediction_text  = None
-    confidence_text  = None
-    url_input        = None
-    risk_reasons     = []
-    explanation      = []
-    is_malicious     = None   # True / False / None — drives template colour
-
-    if request.method == 'POST':
-        url_input = request.form['url'].strip()
-
-        # Basic format guard
-        if ' ' in url_input or '.' not in url_input:
-            return render_template('index.html',
-                prediction="Error: Invalid format. Please enter a valid URL.",
-                url=url_input)
-
-        # Normalise missing scheme
-        if not url_input.startswith(('http://', 'https://')):
-            url_input = 'http://' + url_input
-
-        # Whitelist fast-path
-        if is_whitelisted(url_input):
-            return render_template('index.html',
-                prediction="This URL belongs to a globally trusted domain.",
-                url=url_input,
-                confidence="Trusted Domain",
-                is_malicious=False,
-                risks=[],
-                explanation=[])
-
-        # Feature extraction
-        features = extract_features(url_input)
-        if features is None:
-            return render_template('index.html',
-                prediction="Error: Unable to parse this URL. Please check the format.",
-                url=url_input)
-
-        df_features = pd.DataFrame([features])
-
-        # Model prediction
-        prediction   = model.predict(df_features)[0]
-        probability  = model.predict_proba(df_features)[0][1] * 100
-        is_malicious = bool(prediction == 1)
-
-        if is_malicious:
-            prediction_text = "This URL appears to be malicious."
-            confidence_text = f"{probability:.1f}%"
-        else:
-            prediction_text = "This URL appears to be safe."
-            confidence_text = f"{100 - probability:.1f}%"
-
-        # Rule-based risk flags (shown alongside SHAP)
-        if features['has_ip_in_domain'] == 1:
-            risk_reasons.append("IP address used instead of a domain name")
-        if features['is_non_std_port'] == 1:
-            risk_reasons.append("URL uses a non-standard port")
-        if features.get('suspicious_keyword_count', 0) > 0:
-            risk_reasons.append("URL contains suspicious security or banking keywords")
-        if features.get('url_length', 0) > 75:
-            risk_reasons.append("URL is abnormally long")
-
-        # SHAP explanation
-        explanation = build_explanation(df_features)
-
-    return render_template('index.html',
-        prediction   = prediction_text,
-        url          = url_input,
-        confidence   = confidence_text,
-        is_malicious = is_malicious,
-        risks        = risk_reasons,
-        explanation  = explanation)
-
-
-@app.route('/api/predict', methods=['POST'])
-def predict_api():
+def run_prediction(url_input: str) -> dict:
     """
-    REST endpoint for programmatic access.
+    Runs the full prediction pipeline for a given URL.
 
-    Request  (JSON): { "url": "https://example.com" }
-    Response (JSON): {
-        "url":                 str,
-        "is_malicious":        bool,
-        "verdict":             "malicious" | "safe" | "trusted_domain",
-        "confidence_score":    str,
-        "phishing_probability": float,
-        "explanation":         [{ "label", "value", "direction" }, ...]
+    Returns a result dict:
+      verdict          : 'trusted' | 'known_malicious' | 'malicious' | 'safe'
+      is_malicious     : bool
+      confidence       : str
+      phishing_prob    : float
+      risks            : list[str]   — rule-based + enrichment flags
+      explanation      : list[dict]  — SHAP factors
+      source           : str         — what made the final call
+    """
+    result = {
+        'url':           url_input,
+        'verdict':       None,
+        'is_malicious':  None,
+        'confidence':    None,
+        'phishing_prob': None,
+        'risks':         [],
+        'explanation':   [],
+        'source':        None,
     }
-    """
-    data      = request.get_json(force=True)
-    url_input = data.get('url', '').strip()
 
-    if not url_input:
-        return jsonify({'error': 'No URL provided'}), 400
-
-    if len(url_input) > 2048:
-        return jsonify({'error': 'URL exceeds maximum allowed length of 2048 characters'}), 400
-
-    if not url_input.startswith(('http://', 'https://')):
-        url_input = 'http://' + url_input
-
+    # --- Step 1: Whitelist ---
     if is_whitelisted(url_input):
-        return jsonify({
-            'url':                  url_input,
-            'is_malicious':         False,
-            'verdict':              'trusted_domain',
-            'confidence_score':     '100.0%',
-            'phishing_probability': 0.0,
-            'explanation':          [],
+        result.update({
+            'verdict':      'trusted',
+            'is_malicious': False,
+            'confidence':   '100.0%',
+            'phishing_prob': 0.0,
+            'source':       'whitelist',
         })
+        return result
 
+    # --- Step 2: Threat feed hard override ---
+    if is_known_malicious(url_input):
+        result.update({
+            'verdict':      'known_malicious',
+            'is_malicious': True,
+            'confidence':   '100.0%',
+            'phishing_prob': 100.0,
+            'source':       'threat_feed',
+            'risks':        ['URL found in OpenPhish / URLhaus threat feed'],
+        })
+        return result
+
+    # --- Step 3: ML Model ---
     features = extract_features(url_input)
     if not features:
-        return jsonify({'error': 'Invalid URL or feature extraction failed'}), 400
+        result['verdict'] = 'error'
+        return result
 
     df_features  = pd.DataFrame([features])
     prediction   = model.predict(df_features)[0]
@@ -291,19 +222,130 @@ def predict_api():
     is_malicious = bool(prediction == 1)
     explanation  = build_explanation(df_features)
 
-    return jsonify({
-        'url':                  url_input,
-        'is_malicious':         is_malicious,
-        'verdict':              'malicious' if is_malicious else 'safe',
-        'confidence_score':     f"{probability:.1f}%"       if is_malicious
-                                else f"{100 - probability:.1f}%",
-        'phishing_probability': round(probability, 2),
-        'explanation':          explanation,
+    # Rule-based risk flags (fast, from already-extracted features)
+    risks: list[str] = []
+    if features['has_ip_in_domain']:
+        risks.append("IP address used instead of a domain name")
+    if features['is_non_std_port']:
+        risks.append("URL uses a non-standard port")
+    if features.get('suspicious_keyword_count', 0) > 0:
+        risks.append("URL contains suspicious security or banking keywords")
+    if features.get('url_length', 0) > 75:
+        risks.append("URL is abnormally long")
+    if features.get('tld_risk_score', 0) >= 2:
+        risks.append("URL uses a high-risk free TLD (.tk, .ml, .ga, etc.)")
+    if features.get('brand_lookalike_score', 99) <= 2:
+        risks.append("Domain name closely resembles a known brand (possible typosquat)")
+    if features.get('has_punycode', 0):
+        risks.append("Domain uses Punycode encoding — possible homograph attack")
+    if features.get('subdomain_depth', 0) >= 3:
+        risks.append("Unusually deep subdomain structure")
+
+    # --- Step 4: WHOIS Enrichment (async-safe, cached) ---
+    enrichment_flags = build_enrichment_flags(url_input)
+    risks.extend(enrichment_flags)
+
+    result.update({
+        'verdict':      'malicious' if is_malicious else 'safe',
+        'is_malicious': is_malicious,
+        'confidence':   f"{probability:.1f}%"       if is_malicious
+                        else f"{100 - probability:.1f}%",
+        'phishing_prob': round(probability, 2),
+        'risks':        risks,
+        'explanation':  explanation,
+        'source':       'model',
     })
+    return result
 
 
+# ---------------------------------------------------------------------------
+# Boot Sequence
+# ---------------------------------------------------------------------------
+print("=" * 52)
+print("  Phishing Detector — Boot Sequence")
+print("=" * 52)
+update_whitelist_if_needed()
+load_whitelist()
+load_from_cache()                     # fast — loads threat feed from disk
+threading.Thread(                     # refresh threat feeds in background
+    target=refresh_feeds, daemon=True
+).start()
+print("Boot complete. App is ready.\n")
 
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+@app.route('/', methods=['GET', 'POST'])
+def home():
+    result = {}
+
+    if request.method == 'POST':
+        url_input = request.form['url'].strip()
+
+        if ' ' in url_input or '.' not in url_input:
+            return render_template('index.html',
+                prediction="Error: Invalid format. Please enter a valid URL.",
+                url=url_input)
+
+        if not url_input.startswith(('http://', 'https://')):
+            url_input = 'http://' + url_input
+
+        result = run_prediction(url_input)
+
+        # Map verdict to human-readable prediction text
+        verdict_text = {
+            'trusted':        "This URL belongs to a globally trusted domain.",
+            'known_malicious':"This URL is in an active threat feed — confirmed malicious.",
+            'malicious':      "This URL appears to be malicious.",
+            'safe':           "This URL appears to be safe.",
+            'error':          "Error: Unable to parse this URL. Please check the format.",
+        }.get(result.get('verdict', 'error'), "Unknown result.")
+
+        return render_template('index.html',
+            prediction   = verdict_text,
+            url          = url_input,
+            confidence   = result.get('confidence'),
+            is_malicious = result.get('is_malicious'),
+            risks        = result.get('risks', []),
+            explanation  = result.get('explanation', []),
+            source       = result.get('source'),
+        )
+
+    return render_template('index.html')
+
+
+@app.route('/api/predict', methods=['POST'])
+def predict_api():
+    """
+    REST endpoint.
+
+    Request  (JSON): { "url": "https://example.com" }
+    Response (JSON): full result dict from run_prediction()
+    """
+    data      = request.get_json(force=True)
+    url_input = data.get('url', '').strip()
+
+    if not url_input:
+        return jsonify({'error': 'No URL provided'}), 400
+    if len(url_input) > 2048:
+        return jsonify({'error': 'URL exceeds 2048 character limit'}), 400
+
+    if not url_input.startswith(('http://', 'https://')):
+        url_input = 'http://' + url_input
+
+    result = run_prediction(url_input)
+
+    if result.get('verdict') == 'error':
+        return jsonify({'error': 'Invalid URL or feature extraction failed'}), 400
+
+    return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
 # Entry Point
+# ---------------------------------------------------------------------------
 if __name__ == '__main__':
     debug_mode = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
     app.run(debug=debug_mode)

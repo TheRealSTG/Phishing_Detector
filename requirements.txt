@@ -3,6 +3,7 @@ flask==3.0.3
 gunicorn==22.0.0
 
 # ML
+xgboost==2.0.3
 scikit-learn==1.5.0
 joblib==1.4.2
 shap==0.45.1
@@ -11,8 +12,12 @@ shap==0.45.1
 pandas==2.2.2
 numpy==1.26.4
 
-# URL parsing
+# URL parsing & features
 tldextract==5.1.2
+rapidfuzz==3.9.3
 
-# HTTP client (whitelist download)
+# WHOIS enrichment
+python-whois==0.9.4
+
+# HTTP client
 requests==2.32.3
