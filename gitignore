@@ -1,0 +1,20 @@
+# Model (binary — regenerate with train_model.py)
+model.pkl
+
+# Whitelist (downloaded automatically on boot)
+top-1m.csv
+
+# Dataset (download from Kaggle separately)
+malicious_phish.csv
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db

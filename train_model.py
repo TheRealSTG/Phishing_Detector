@@ -1,113 +1,89 @@
-# Imports pandas for data manipulation and working with CSV files
-import pandas as pd
-# Imports the function to split data into training and testing sets
-from sklearn.model_selection import train_test_split
-# Imports the model that is to be used, the Random Forest Classifier
-from sklearn.ensemble import RandomForestClassifier
-# Imports the classification report and the accuracy score for testing metrics
-from sklearn.metrics import classification_report, accuracy_score
-# Used to save and load trained models as pickle files
+"""
+train_model.py
+--------------
+Trains a Random Forest classifier on the Kaggle malicious URL dataset and
+saves the resulting model as model.pkl.
+
+Dataset: https://www.kaggle.com/datasets/sid321axn/malicious-urls-dataset
+Expected CSV columns: url, type
+    type values: 'benign', 'phishing', 'defacement', 'malware'
+
+Usage:
+    python train_model.py
+"""
+
+import sys
+
 import joblib
-# Imports the extract_funtions from features.py
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report
+from sklearn.model_selection import train_test_split
+
 from features import extract_features
 
-# Defines the input CSV filename containing URLs and labels
-DATA_FILE = 'malicious_phish.csv'
-# Output filename for the trained model
+DATA_FILE  = 'malicious_phish.csv'
 MODEL_FILE = 'model.pkl'
 
-def main():
-    print(f"Loading data from {DATA_FILE}...")
-    # Loads the CSV file into a pandas DataFrame.
-    ## If the file does not exist, print an error and exit.
+
+def main() -> None:
+
+    # Load dataset
+    print(f"Loading data from '{DATA_FILE}'...")
     try:
         df = pd.read_csv(DATA_FILE)
     except FileNotFoundError:
-        print(f"ERROR: file {DATA_FILE} not found.")
-        return
-    
-    # Filter out for a cleaner dataset
-    print("Extracting vectorised features.")
+        print(f"ERROR: '{DATA_FILE}' not found.")
+        print("Download it from: https://www.kaggle.com/datasets/sid321axn/malicious-urls-dataset")
+        sys.exit(1)
 
-    # Drop the rows where the URL is missing or not a number
     df = df.dropna(subset=['url'])
+    print(f"Loaded {len(df):,} URLs after dropping rows with missing URLs.")
 
-    print("Extracting Features...")
+    # Feature extraction
+    print("Extracting features (this may take a few minutes)...")
+    features_list: list[dict] = []
+    labels:        list[int]  = []
 
-    features_list = []
-    valid_labels = []
-
-    # Iterating through the data and building a list of valid feature sets
-    for index, row in df.iterrows():
-        url = row['url']
-        label = row['type']
-
-        extracted = extract_features(url)
-
-        # Only keep rows where extraction is succesful
+    for _, row in df.iterrows():
+        extracted = extract_features(row['url'])
         if extracted is not None:
             features_list.append(extracted)
-            # Convert labels
-            valid_labels.append(0 if label == 'benign' else 1)
-
-    # Converting the lists into Pandas Objects
+            labels.append(0 if row['type'] == 'benign' else 1)
 
     X = pd.DataFrame(features_list)
-    y = pd.Series(valid_labels)
+    y = pd.Series(labels)
 
-    print(f"Successfully extracted features for {len(X)} valid URLs out of {len(df)} total.") 
+    print(f"Successfully extracted features for {len(X):,} / {len(df):,} URLs.")
 
-    # Checking before splitting
     if len(X) == 0:
-        print("ERROR: 'X' is empty. Check features.py")
-        exit()
-    
+        print("ERROR: Feature extraction produced no results. Check features.py.")
+        sys.exit(1)
 
-    # Old Approach, still keeping it here just because 
-    ##################################################################################
-    # Iterate to handle any bad data
-    ## Iterates through each row and extracts the URL and label columns
-    ## Calls the extract_function() on the URL and appends the result to features_list
-    ## Skips the malformed URLs
-    # for index, row in df.iterrows():
-    #    url = row['url']
-    #    label = row['type']
+    # Train / test split
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+    print(f"Training on {len(X_train):,} samples, testing on {len(X_test):,} samples.")
 
-    #    extracted = extract_features(url)
-    #    if extracted:
-    #        features_list.append(extracted)
-    #        # Convert the text label to a number.
-    #        ## Phishing = 1
-    #        ## Benign = 0
-    #        if label == 'benign':
-    #            labels.append(0)
-    #        else:
-    #            # Everything else is treated as phishing
-    #            labels.append(1)
-    
-    # Converts the feature list into a DataFrame  with each feature as a column and each URL as a row.
-    ## Converts the labels into a Series.
+    # Training
+    print("Training Random Forest...")
+    model = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+    model.fit(X_train, y_train)
 
-    print(f"Training on {len(X)} URLs...")
-    
-    # Split the data using the training and testing splits
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    # Random Forest Model Training
-    rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
-    rf_model.fit(X_train, y_train)
-
-    # Evaluation of the model
-    y_pred = rf_model.predict(X_test)
+    # Evaluation
+    y_pred   = model.predict(X_test)
     accuracy = accuracy_score(y_test, y_pred)
-    print(f"\n ~~~Training is Complete~~~")
+
+    print("\n~~~ Training Complete ~~~")
     print(f"Accuracy: {accuracy * 100:.2f}%")
     print("\nDetailed Report:")
-    print(classification_report(y_test, y_pred))
+    print(classification_report(y_test, y_pred, target_names=['Benign', 'Malicious']))
 
-    # Saving the model
-    joblib.dump(rf_model, MODEL_FILE)
-    print(f"Model saved to {MODEL_FILE}")
+    # 6. Save model
+    joblib.dump(model, MODEL_FILE)
+    print(f"\nModel saved to '{MODEL_FILE}'.")
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     main()

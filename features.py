@@ -1,119 +1,102 @@
-# Regular Expression module used for pattern matching
 import re
-# Used to break down the URLs into its constituent components, like its scheme, netloc, path
-from urllib.parse import urlparse, unquote
-
 import math
 from collections import Counter
+from urllib.parse import urlparse, unquote
 import tldextract
 
-# Recursively decudes the URL encoded strings to defeat multi-layer obfuscation.
-def deep_decode(text):
+
+
+# Helper functions
+
+def deep_decode(text: str) -> str:
+    """
+    Recursively URL-decodes a string until it stops changing.
+    Defeats multi-layer percent-encoding obfuscation.
+    """
     if not text:
         return ""
-    
     decoded = unquote(text)
-    # Keep decoding until the string stops changing.
     while decoded != text:
-        text = decoded
+        text    = decoded
         decoded = unquote(text)
     return decoded.lower()
-    
 
-def calculate_entropy(text):
+
+def calculate_entropy(text: str) -> float:
+    """
+    Calculates Shannon entropy of a string.
+    High entropy → highly random characters → typical of generated/obfuscated domains.
+    """
     if not text:
-        return 0
-    entropy = 0
-    length = len(text)
-    # Count the frequency of each character 
+        return 0.0
+    length  = len(text)
+    entropy = 0.0
     for count in Counter(text).values():
-        probability = count / length
-        entropy -= probability * math.log2(probability)
+        p       = count / length
+        entropy -= p * math.log2(p)
     return entropy
 
-def is_obfuscated_ip(netloc):
-    domain = netloc.split(':')[0]
-    try:
 
-# Inputs URL string 
-def extract_features(url):
-    # Initialises the empty dictionary
-    features = {}
+# Main Feature Extraction
 
-    # Handle empty or malformed URLs
-    ## Ensures that the URL exists and is a string
+def extract_features(url: str) -> dict | None:
+    """
+    Extracts a fixed set of numerical features from a URL string.
+
+    Returns a dict of features, or None if the URL is empty / unparseable.
+
+    """
     if not url or not isinstance(url, str):
         return None
-    
-    # Parses the URL, returns None if the parsing fails due to a malformed URL.
+
     try:
-        parsed_url = urlparse(url)
-        # tldextract fetches the list if it doesnt have it
-        extracted_domain = tldextract.extract(url)
+        parsed    = urlparse(url)
+        extracted = tldextract.extract(url)   # noqa: F841 (available for future features)
     except Exception as e:
-        # instead of just faliing, it will say why it failed
-        print(f"Failed to parse URL {url}. Error {e}")
+        print(f"Failed to parse URL '{url}': {e}")
         return None
-    
-    # Structure and Length Features
-    ## Calculates the total URL Length
-    features['url_length'] = len(url)
-    ## Calculates the domain name length
-    features['hostname_length'] = len(parsed_url.netloc)
-    ## Calculates the path length 
-    ### Sometimes, longer URLs are used in phishing.
-    features['path_length'] = len(parsed_url.path)
-    
-    features['url_entropy'] = calculate_entropy(url)
-    features['domain_entrophy'] = calculate_entropy(parsed_url.netloc)
 
-    # Special character counting
-    ## Phishers often use these to confuzzle users
-    features['dot_count'] = url.count('.')
-    features['hyphen_count'] = url.count('-')
-    features['at_count'] = url.count('@')
+    features: dict = {}
+
+    # --- Structure & Length ---
+    features['url_length']      = len(url)
+    features['hostname_length'] = len(parsed.netloc)
+    features['path_length']     = len(parsed.path)
+    features['url_entropy']     = calculate_entropy(url)
+    features['domain_entropy'] = calculate_entropy(parsed.netloc)
+
+    # --- Special Character Counts ---
+    features['dot_count']      = url.count('.')
+    features['hyphen_count']   = url.count('-')
+    features['at_count']       = url.count('@')
     features['question_count'] = url.count('?')
-    features['percent_count'] = url.count('%')
+    features['percent_count']  = url.count('%')
 
-    # Protocol and Port Checking
-    ## Sets the flag to 1 if HTTPS is used. (this is more secure)
-    ## Sets the flag to 0 if HTTPS is not used. (less secure)
-    features['is_https'] = 1 if parsed_url.scheme == 'https' else 0
+    # --- Protocol ---
+    features['is_https'] = 1 if parsed.scheme == 'https' else 0
 
-    # Check for weird ports
-    ## Anything except 80 for HTTP or 443 for HTTPS.
-    ## Non-standard ports are sus.
+    # --- Non-Standard Port Detection ---
     try:
-        port = parsed_url.port
-        if port and port not in [80, 443]:
-            features['is_non_std_port'] = 1
-        else:
-            features['is_non_std_port'] = 0
-    except:
-        features['is_non_std_port'] = 0 
+        port = parsed.port
+        features['is_non_std_port'] = 1 if (port and port not in (80, 443)) else 0
+    except Exception:
+        features['is_non_std_port'] = 0
 
-    # Detection of IP Adresses
-    ## Legit sites usually have domain names.
-    ## Malware often live on raw IP addresses.
-    ## Uses regex to check if the domain is a raw IP address instead of a domain name.
-    ## Sets the flag to 1 if found.
+    # --- IP Address Detection ---
+    # Legitimate sites use domain names; phishing pages often use raw IPs.
     ip_pattern = r"(([01]?\d\d?|2[0-4]\d|25[0-5])\.){3}([01]?\d\d?|2[0-4]\d|25[0-5])"
-    if re.search(ip_pattern, parsed_url.netloc):
-        features['has_ip_in_domain'] = 1
-    else:
-        features['has_ip_in_domain'] = 0
-    
-    # Suspicious Keyword Detection
-    ## Defines keywords that are commonly found in phisihing URLs.
-    ## Loops through each keyword and counts how many times they appear in the URL
-    ## This is case-insensitive.
+    features['has_ip_in_domain'] = 1 if re.search(ip_pattern, parsed.netloc) else 0
 
-    # Use the deep_decode function before checking for suspicious keywords.
-    fully_decoded_url = deep_decode(url)
+    # --- Suspicious Keyword Detection ---
+    # Deep-decode first to catch obfuscated keywords like %6C%6F%67%69%6E → login
+    decoded_url = deep_decode(url)
     suspicious_keywords = [
-        'login', 'secure', 'account', 'update', 'banking', 'confirm', 'verify', 'password',
-        'ebay', 'paypal', 'signin', 'upi'
+        'login', 'secure', 'account', 'update', 'banking',
+        'confirm', 'verify', 'password', 'ebay', 'paypal',
+        'signin', 'upi',
     ]
-    features['suspicious_keyword_count'] = sum(1 for word in suspicious_keywords if word in fully_decoded_url)
+    features['suspicious_keyword_count'] = sum(
+        1 for kw in suspicious_keywords if kw in decoded_url
+    )
 
     return features

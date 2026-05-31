@@ -1,36 +1,504 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Phishing URL Detector</title>
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Phishing Detector</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    /* Design tokens*/
+    :root {
+      --bg:          #0a0c0f;
+      --surface:     #111418;
+      --border:      #1f2530;
+      --border-soft: #161b22;
+      --text:        #cdd9e5;
+      --text-dim:    #636e7b;
+      --text-faint:  #2d3640;
+
+      --green:       #3fb950;
+      --green-dim:   #1a3d22;
+      --red:         #f85149;
+      --red-dim:     #3d1a1a;
+      --yellow:      #d29922;
+      --yellow-dim:  #3d2e0a;
+      --blue:        #58a6ff;
+      --blue-dim:    #0d2044;
+
+      --mono: 'IBM Plex Mono', monospace;
+      --sans: 'IBM Plex Sans', sans-serif;
+
+      --radius: 6px;
+    }
+
+    /* Reset & base*/
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { font-size: 15px; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-weight: 300;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* Subtle grid background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(var(--border-soft) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border-soft) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Layout*/
+    .page {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 720px;
+      padding: 64px 24px 96px;
+    }
+
+    /* Header*/
+    header {
+      margin-bottom: 48px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      border-radius: 99px;
+      margin-bottom: 20px;
+    }
+
+    .badge::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.4; }
+    }
+
+    h1 {
+      font-family: var(--mono);
+      font-size: 1.9rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: #e6edf3;
+      line-height: 1.2;
+    }
+
+    h1 span { color: var(--red); }
+
+    .subtitle {
+      margin-top: 10px;
+      font-size: 0.9rem;
+      color: var(--text-dim);
+      line-height: 1.6;
+    }
+
+    /* Scan form*/
+    .form-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .form-label {
+      display: block;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 10px;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    .url-input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 0.88rem;
+      padding: 11px 14px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .url-input:focus  { border-color: var(--blue); }
+    .url-input::placeholder { color: var(--text-faint); }
+
+    .scan-btn {
+      background: var(--blue);
+      color: #0d1117;
+      border: none;
+      border-radius: var(--radius);
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      padding: 11px 22px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s, transform 0.1s;
+    }
+
+    .scan-btn:hover  { background: #79c0ff; }
+    .scan-btn:active { transform: scale(0.97); }
+
+    /* Result card*/
+    .result-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      animation: slideUp 0.3s ease;
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0);    }
+    }
+
+    /* Coloured top bar indicates verdict */
+    .result-card.safe    { border-top: 3px solid var(--green); }
+    .result-card.danger  { border-top: 3px solid var(--red);   }
+    .result-card.trusted { border-top: 3px solid var(--blue);  }
+    .result-card.error   { border-top: 3px solid var(--yellow);}
+
+    /* ---- Verdict header ---- */
+    .verdict-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .verdict-left   { display: flex; align-items: center; gap: 14px; }
+
+    .verdict-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      font-size: 1.1rem;
+      flex-shrink: 0;
+    }
+
+    .safe    .verdict-icon { background: var(--green-dim);  color: var(--green);  }
+    .danger  .verdict-icon { background: var(--red-dim);    color: var(--red);    }
+    .trusted .verdict-icon { background: var(--blue-dim);   color: var(--blue);   }
+    .error   .verdict-icon { background: var(--yellow-dim); color: var(--yellow); }
+
+    .verdict-text {
+      font-size: 1rem;
+      font-weight: 500;
+      color: #e6edf3;
+    }
+
+    .verdict-url {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-top: 3px;
+      word-break: break-all;
+    }
+
+    .confidence-pill {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      padding: 5px 12px;
+      border-radius: 99px;
+      flex-shrink: 0;
+    }
+
+    .safe    .confidence-pill { background: var(--green-dim); color: var(--green);  border: 1px solid #2d5c36; }
+    .danger  .confidence-pill { background: var(--red-dim);   color: var(--red);    border: 1px solid #5c2d2d; }
+    .trusted .confidence-pill { background: var(--blue-dim);  color: var(--blue);   border: 1px solid #1a3a6e; }
+
+    /* ---- Risk flags ---- */
+    .risk-section {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .section-label {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 10px;
+    }
+
+    .risk-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .risk-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      color: var(--red);
+    }
+
+    .risk-item::before {
+      content: '▲';
+      font-size: 0.6rem;
+      flex-shrink: 0;
+    }
+
+    /* ---- SHAP explanation ---- */
+    .explanation-section {
+      padding: 16px 24px 20px;
+    }
+
+    .explanation-bars {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 180px 1fr 42px;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .bar-label {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      text-align: right;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .bar-track {
+      background: var(--bg);
+      border-radius: 3px;
+      height: 8px;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .bar-fill.risk { background: var(--red);   }
+    .bar-fill.safe { background: var(--green); }
+
+    .bar-value {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      text-align: right;
+    }
+
+    /* ---- No-explanation fallback ---- */
+    .no-explanation {
+      font-size: 0.82rem;
+      color: var(--text-dim);
+      font-style: italic;
+    }
+
+    /* Footer*/
+    footer {
+      margin-top: 48px;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--text-faint);
+      text-align: center;
+      line-height: 1.8;
+    }
+
+    footer a { color: var(--text-dim); text-decoration: none; }
+    footer a:hover { color: var(--text); }
+
+    /* Responsiveness*/
+    @media (max-width: 520px) {
+      h1 { font-size: 1.4rem; }
+      .input-row { flex-direction: column; }
+      .bar-row { grid-template-columns: 120px 1fr 38px; }
+      .verdict-header { flex-direction: column; align-items: flex-start; }
+    }
+  </style>
 </head>
+
 <body>
-    <div class="container">
-        <h1> Phishing Detector</h1>
-        <p> Enter a URL that you suspect is malicious</p>
-        <form method="POST">
-            <input type="url" name="url" placeholder="http://example.com" value="{{ url }}" required>
-            <br><br>
-            <input type="submit" value="Scan URL">
-        </form>
+<div class="page">
 
-        {% if prediction %}
-            <div class="result {% if 'malicious' in prediction %}danger{% else %}safe{% endif %}">
-                <p>{{ prediction }}</p>
-                    <small> Confidence Score: {{ confidence }}</small>
+  <!-- Header-->
+  <header>
+    <div class="badge">ML-powered · Zero-day detection</div>
+    <h1>Phishing<span>.</span>Detect</h1>
+    <p class="subtitle">
+      Paste any URL below. The model analyses URL structure, entropy, keyword patterns,
+      and domain characteristics — then explains exactly why it flagged it.
+    </p>
+  </header>
 
-                    {% if risks %}
-                        <div style="margin-top: 15px; text-align: left; background: #fff0f0; padding: 10px; border-radius: 5px;">
-                            <strong> Risk Factors Detected: </strong>
-                            <ul>
-                                {% for risk in risks %}
-                                    <li>{{ risk }}</li>
-                                {% endfor %}
-                            </ul>
-                        </div>
-                    {% endif %}
-            </div>
+  <!-- Scan form-->
+  <div class="form-card">
+    <label class="form-label" for="url-field">URL to scan</label>
+    <form method="POST" action="/">
+      <div class="input-row">
+        <input
+          id="url-field"
+          class="url-input"
+          type="text"
+          name="url"
+          placeholder="https://example.com/login?ref=..."
+          value="{{ url or '' }}"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button class="scan-btn" type="submit">Scan →</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Result (only shown after a POST)-->
+  {% if prediction %}
+
+    {# Determine card class from verdict #}
+    {% if is_malicious == true %}
+      {% set card_class = 'danger' %}
+      {% set icon = '✕' %}
+    {% elif is_malicious == false and 'trusted' in (prediction | lower) %}
+      {% set card_class = 'trusted' %}
+      {% set icon = '★' %}
+    {% elif is_malicious == false %}
+      {% set card_class = 'safe' %}
+      {% set icon = '✓' %}
+    {% else %}
+      {% set card_class = 'error' %}
+      {% set icon = '!' %}
+    {% endif %}
+
+    <div class="result-card {{ card_class }}">
+
+      <!-- Verdict header -->
+      <div class="verdict-header">
+        <div class="verdict-left">
+          <div class="verdict-icon">{{ icon }}</div>
+          <div>
+            <div class="verdict-text">{{ prediction }}</div>
+            {% if url %}
+              <div class="verdict-url">{{ url }}</div>
+            {% endif %}
+          </div>
+        </div>
+        {% if confidence %}
+          <div class="confidence-pill">{{ confidence }}</div>
         {% endif %}
-    </div>
+      </div>
+
+      <!-- Risk flags -->
+      {% if risks %}
+        <div class="risk-section">
+          <div class="section-label">Risk Indicators Detected</div>
+          <div class="risk-list">
+            {% for r in risks %}
+              <div class="risk-item">{{ r }}</div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+
+      <!-- SHAP Explanation -->
+      {% if explanation %}
+        <div class="explanation-section">
+          <div class="section-label">Why the model decided this</div>
+          <div class="explanation-bars">
+            {# Find max value for normalising bar widths #}
+            {% set max_val = explanation | map(attribute='value') | max %}
+
+            {% for factor in explanation %}
+              {% set width_pct = ((factor.value / max_val) * 100) | round | int %}
+              <div class="bar-row">
+                <div class="bar-label" title="{{ factor.label }}">{{ factor.label }}</div>
+                <div class="bar-track">
+                  <div
+                    class="bar-fill {{ factor.direction }}"
+                    style="width: {{ width_pct }}%"
+                  ></div>
+                </div>
+                <div class="bar-value">{{ factor.value }}</div>
+              </div>
+            {% endfor %}
+          </div>
+
+          <p style="margin-top: 14px; font-size: 0.75rem; color: var(--text-faint);">
+            <span style="color: var(--red);">■</span> pushes toward malicious &nbsp;
+            <span style="color: var(--green);">■</span> pushes toward safe
+          </p>
+        </div>
+
+      {% elif is_malicious is not none %}
+        <div class="explanation-section">
+          <p class="no-explanation">No significant individual features identified.</p>
+        </div>
+      {% endif %}
+
+    </div><!-- .result-card -->
+  {% endif %}
+
+  <!-- Footer-->
+  <footer>
+    <p>Random Forest · Trained on 651,191 URLs · Tranco Top-1M whitelist</p>
+    <p style="margin-top: 6px;">
+      <a href="/api/predict" target="_blank">REST API</a> &nbsp;·&nbsp;
+      <a href="https://github.com/TheRealSTG/Phishing_Detector" target="_blank">GitHub</a>
+    </p>
+  </footer>
+
+</div>
 </body>
 </html>
