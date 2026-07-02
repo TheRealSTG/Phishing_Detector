@@ -10,14 +10,14 @@ shap==0.45.1
 
 # Data
 pandas==2.2.2
-numpy==1.26.4
+numpy>=1.26.4,<2.4
 
 # URL parsing & features
 tldextract==5.1.2
 rapidfuzz==3.9.3
 
 # WHOIS enrichment
-python-whois==0.9.4
+python-whois==0.9.4clear
 
 # HTTP client
 requests==2.32.3

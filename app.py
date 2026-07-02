@@ -29,9 +29,7 @@ from enrichment   import build_enrichment_flags
 
 app = Flask(__name__)
 
-# ---------------------------------------------------------------------------
 # Model Loading
-# ---------------------------------------------------------------------------
 try:
     model = joblib.load('model.pkl')
 except FileNotFoundError:
@@ -39,9 +37,7 @@ except FileNotFoundError:
         "model.pkl not found. Run `python train_model.py` first."
     )
 
-# ---------------------------------------------------------------------------
 # SHAP Explainer (loaded once at startup)
-# ---------------------------------------------------------------------------
 explainer = shap.TreeExplainer(model)
 
 # Human-readable labels for every feature in features.py
@@ -66,11 +62,17 @@ FEATURE_LABELS = {
     'digit_ratio_in_domain':   'Digits in Domain Name',
     'has_punycode':            'Punycode / Homograph Domain',
     'path_depth':              'URL Path Depth',
+    # New features
+    'has_tld_in_path':         'Legitimate TLD Embedded in Path',
+    'query_string_length':     'Query String Length',
+    'num_query_params':        'Number of Query Parameters',
+    'digit_letter_ratio':      'Digit-to-Letter Ratio',
+    'special_chars_in_domain': 'Special Characters in Domain',
+    'vowel_ratio':             'Vowel Ratio in Domain',
 }
 
-# ---------------------------------------------------------------------------
+
 # Whitelist Logic
-# ---------------------------------------------------------------------------
 WHITELIST_FILE    = 'top-1m.csv'
 TRANCO_URL        = 'https://tranco-list.eu/top-1m.csv.zip'
 MAX_AGE_DAYS      = 7
@@ -120,10 +122,7 @@ def is_whitelisted(url: str) -> bool:
         return False
 
 
-# ---------------------------------------------------------------------------
 # SHAP Explanation Builder
-# ---------------------------------------------------------------------------
-
 def build_explanation(df_features: pd.DataFrame) -> list[dict]:
     """
     Returns top-6 SHAP contributions as a list of dicts:
@@ -158,10 +157,7 @@ def build_explanation(df_features: pd.DataFrame) -> list[dict]:
         print(f"[shap] Explanation failed: {e}")
         return []
 
-
-# ---------------------------------------------------------------------------
 # Core Prediction Pipeline
-# ---------------------------------------------------------------------------
 
 def run_prediction(url_input: str) -> dict:
     """
@@ -187,7 +183,7 @@ def run_prediction(url_input: str) -> dict:
         'source':        None,
     }
 
-    # --- Step 1: Whitelist ---
+    # Step 1: Whitelist
     if is_whitelisted(url_input):
         result.update({
             'verdict':      'trusted',
@@ -198,7 +194,7 @@ def run_prediction(url_input: str) -> dict:
         })
         return result
 
-    # --- Step 2: Threat feed hard override ---
+    # Step 2: Threat feed hard override
     if is_known_malicious(url_input):
         result.update({
             'verdict':      'known_malicious',
@@ -210,7 +206,7 @@ def run_prediction(url_input: str) -> dict:
         })
         return result
 
-    # --- Step 3: ML Model ---
+    # Step 3: ML Model
     features = extract_features(url_input)
     if not features:
         result['verdict'] = 'error'
@@ -241,7 +237,7 @@ def run_prediction(url_input: str) -> dict:
     if features.get('subdomain_depth', 0) >= 3:
         risks.append("Unusually deep subdomain structure")
 
-    # --- Step 4: WHOIS Enrichment (async-safe, cached) ---
+    # Step 4: WHOIS Enrichment (async-safe, cached)
     enrichment_flags = build_enrichment_flags(url_input)
     risks.extend(enrichment_flags)
 
@@ -257,10 +253,7 @@ def run_prediction(url_input: str) -> dict:
     })
     return result
 
-
-# ---------------------------------------------------------------------------
 # Boot Sequence
-# ---------------------------------------------------------------------------
 print("=" * 52)
 print("  Phishing Detector — Boot Sequence")
 print("=" * 52)
@@ -273,10 +266,7 @@ threading.Thread(                     # refresh threat feeds in background
 print("Boot complete. App is ready.\n")
 
 
-# ---------------------------------------------------------------------------
 # Routes
-# ---------------------------------------------------------------------------
-
 @app.route('/', methods=['GET', 'POST'])
 def home():
     result = {}
@@ -342,10 +332,7 @@ def predict_api():
 
     return jsonify(result)
 
-
-# ---------------------------------------------------------------------------
 # Entry Point
-# ---------------------------------------------------------------------------
 if __name__ == '__main__':
     debug_mode = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
     app.run(debug=debug_mode)
